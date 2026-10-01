@@ -31,6 +31,15 @@ reports/<CONTRACT>/                       reports (see "Where reports are")
 The ZIP may hold JSON files directly or inside any folder structure; extraction and JSON discovery are automatic.
 Browser upload limit is **25 MB per file**; larger ZIPs: `git add input/H1625/H1625.zip && git commit && git push` (limit 100 MB; above that use Git LFS).
 
+## Upload a ZIP larger than 25 MB (e.g. 110 MB) - Release method, all in the browser
+The browser cannot upload >25 MB to a folder, and git rejects >100 MB. Use a Release (up to 2 GB per file):
+1. Repo page > right side **Releases** > **Draft a new release**.
+2. **Choose a tag** > type `input-H1625` > **Create new tag** (use `input-H1619`, `input-H3124`, `input-H9207` for the others).
+3. Title: `H1625 input`. Drag your `H1625.zip` into the "Attach binaries" box (file name must be exactly `H1625.zip`), wait for the upload to finish.
+4. Tick **Set as a pre-release** and click **Publish release** (not "Save draft").
+The validation workflow downloads it automatically when `input/H1625/H1625.zip` is not in the repo (a ZIP in the repo takes priority).
+**Replace:** run Cleanup with ZIP=DELETE (removes the release asset), then edit the release and upload the new `H1625.zip`; or edit the release, delete the old file and attach the new one.
+
 ## Run validation
 Actions > **MPF Manual Validation** > **Run workflow** > Contract ID `H1625`, Send Email `No` (or `Yes`) > Run.
 - All scripts run even if one fails; the job summary lists each separately plus Total / Passed / Failed / Overall.

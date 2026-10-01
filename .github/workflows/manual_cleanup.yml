@@ -48,6 +48,7 @@ jobs:
       DEL_ZIP: ${{ github.event.inputs.zip }}
       DEL_JSON: ${{ github.event.inputs.json }}
       CONFIRM: ${{ github.event.inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +65,10 @@ jobs:
           [ -d "$DIR" ] || { echo "::error::$DIR does not exist."; exit 1; }
           : > deleted.txt
           if [ "$DEL_ZIP" = "DELETE" ]; then
+            if gh release view "input-$CONTRACT" >/dev/null 2>&1 && \
+               gh release delete-asset "input-$CONTRACT" "$CONTRACT.zip" -y 2>/dev/null; then
+              echo "release input-$CONTRACT asset $CONTRACT.zip" >> deleted.txt
+            fi
             [ -f "$DIR/$CONTRACT.zip" ] && { git rm -q "$DIR/$CONTRACT.zip"; echo "$DIR/$CONTRACT.zip" >> deleted.txt; } \
               || echo "No ZIP found at $DIR/$CONTRACT.zip"
           fi

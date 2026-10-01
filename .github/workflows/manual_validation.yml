@@ -58,6 +58,18 @@ jobs:
               sys.exit("::error::%s is missing from config/contracts.json - add it (see README, Future contracts)." % c)
           EOF
 
+      - name: Fetch large ZIP from release (only if not in input/)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          F="input/$CONTRACT/$CONTRACT.zip"
+          if [ -f "$F" ]; then echo "Using $F from the repository."; exit 0; fi
+          if gh release download "input-$CONTRACT" -p "$CONTRACT.zip" -D "input/$CONTRACT" --repo "${{ github.repository }}"; then
+            echo "Downloaded $CONTRACT.zip from release input-$CONTRACT."
+          else
+            echo "No ZIP in repo or in release input-$CONTRACT (the next step will report it)."
+          fi
+
       - name: Extract ZIP, find JSON, run all validation scripts
         id: run
         run: |

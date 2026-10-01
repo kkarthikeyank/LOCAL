@@ -2,3 +2,4 @@ work/
 __pycache__/
 *.pyc
 .mpf_cache/
+*.zip.zip
