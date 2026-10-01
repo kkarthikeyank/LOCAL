@@ -12,7 +12,7 @@ scripts/mpf_auditLOCAL.py                 CMS technical guide audit (Word report
 scripts/validate_maLOCAL.py               Appendix A/B/E field + cross-resource checks
 tools/run_validations.py                  unzip -> find JSON -> run all scripts -> results.json
 tools/send_email.py                       one email per script, own template (email_templates/)
-tools/summary.py                          job summary
+tools/plan.py, tools/aggregate.py, tools/summary.py   job matrix, combined summary
 input/<CONTRACT>/<CONTRACT>.zip           you upload this
 reports/<CONTRACT>/                       reports (see "Where reports are")
 ```
@@ -41,9 +41,11 @@ The validation workflow downloads it automatically when `input/H1625/H1625.zip` 
 **Replace:** run Cleanup with ZIP=DELETE (removes the release asset), then edit the release and upload the new `H1625.zip`; or edit the release, delete the old file and attach the new one.
 
 ## Run validation
-Actions > **MPF Manual Validation** > **Run workflow** > Contract ID `H1625`, Send Email `No` (or `Yes`) > Run.
+Actions > **MPF Manual Validation** > **Run workflow** > Contract ID `H1625`, Script `ALL` (or one script file), Send Email `No` (or `Yes`) > Run.
+- Each script runs as its own **parallel job** (own result, own artifact, own email). `ALL` runs every `scripts/*.py`; picking one file runs only that script (e.g. re-run just `validate_maLOCAL.py`). A new script is included in `ALL` automatically; add its file name to the Script dropdown only if you want to run it alone.
+- A final **report** job merges everything into one summary with the overall result.
 - All scripts run even if one fails; the job summary lists each separately plus Total / Passed / Failed / Overall.
-- Reports are uploaded as artifact **MPF-H1625-Validation-Reports** (only that contract). Download it from the run page.
+- Reports are uploaded as one artifact per script, **MPF-H1625-<script>-Reports** (only that contract). Download it from the run page.
 - A script is **PASS** when it exits 0. Exit 1 means findings: check_hy = dangling references found, mpf_audit = Level 1 fatal findings, validate_ma = failed checks.
 
 ### Where reports are

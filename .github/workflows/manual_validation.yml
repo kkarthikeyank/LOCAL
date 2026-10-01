@@ -1,7 +1,7 @@
 name: MPF Manual Validation
 
-# Manual only. Pick a contract, upload nothing here -- the ZIP must already be in
-# input/<CONTRACT>/<CONTRACT>.zip (see README, "Upload a ZIP").
+# Manual only. ZIP must already be in input/<CONTRACT>/<CONTRACT>.zip or in release input-<CONTRACT>
+# (see README). Each validation script runs as its own parallel job.
 on:
   workflow_dispatch:
     inputs:
@@ -15,6 +15,16 @@ on:
           - H1619
           - H3124
           - H9207
+      script:
+        description: "Script (ALL = every scripts/*.py)"
+        type: choice
+        required: true
+        default: ALL
+        options:            # <-- optional: add a new script's file name here to run it alone
+          - ALL
+          - check_hyLOCAL.py
+          - mpf_auditLOCAL.py
+          - validate_maLOCAL.py
       send_email:
         description: "Send Email"
         type: choice
@@ -31,12 +41,40 @@ concurrency:
   group: mpf-validation-${{ github.event.inputs.contract }}
   cancel-in-progress: false
 
+env:
+  CONTRACT: ${{ github.event.inputs.contract }}
+
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected: ${{ steps.plan.outputs.expected }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check contract is configured
+        run: |
+          python - <<'EOF'
+          import json, os, sys
+          c = os.environ["CONTRACT"]
+          if c not in json.load(open("config/contracts.json")):
+              sys.exit("::error::%s is missing from config/contracts.json - add it (see README, Future contracts)." % c)
+          EOF
+      - name: Discover validation scripts
+        id: plan
+        run: python tools/plan.py "${{ github.event.inputs.script }}"
+
   validate:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    env:
-      CONTRACT: ${{ github.event.inputs.contract }}
+    name: validate (${{ matrix.script }})
+    strategy:
+      fail-fast: false          # one script failing never stops the others
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,16 +85,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Check contract is configured
-        run: |
-          python - <<'EOF'
-          import json, os, sys
-          c = os.environ["CONTRACT"]
-          cfg = json.load(open("config/contracts.json"))
-          if c not in cfg:
-              sys.exit("::error::%s is missing from config/contracts.json - add it (see README, Future contracts)." % c)
-          EOF
 
       - name: Fetch large ZIP from release (only if not in input/)
         env:
@@ -70,10 +98,10 @@ jobs:
             echo "No ZIP in repo or in release input-$CONTRACT (the next step will report it)."
           fi
 
-      - name: Extract ZIP, find JSON, run all validation scripts
+      - name: Extract ZIP, find JSON, run ${{ matrix.script }}
         id: run
         run: |
-          python tools/run_validations.py "$CONTRACT"
+          python tools/run_validations.py "$CONTRACT" --only "${{ matrix.script }}"
           RES="$(cat work/results_path.txt)"
           echo "results=$RES" >> "$GITHUB_OUTPUT"
           echo "run_dir=$(dirname "$RES")" >> "$GITHUB_OUTPUT"
@@ -82,12 +110,12 @@ jobs:
         if: always() && steps.run.outputs.run_dir != ''
         uses: actions/upload-artifact@v4
         with:
-          name: MPF-${{ github.event.inputs.contract }}-Validation-Reports
+          name: MPF-${{ github.event.inputs.contract }}-${{ matrix.stem }}-Reports
           path: ${{ steps.run.outputs.run_dir }}
           retention-days: 30
           if-no-files-found: warn
 
-      - name: Send email (one per validation script)
+      - name: Send email (this script)
         if: always() && github.event.inputs.send_email == 'Yes' && steps.run.outputs.results != ''
         env:
           EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
@@ -98,16 +126,29 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python tools/send_email.py "${{ steps.run.outputs.results }}"
 
-      - name: Job summary
-        if: always() && steps.run.outputs.results != ''
-        run: python tools/summary.py "${{ steps.run.outputs.results }}"
-
-      - name: Fail job if validation failed
+      - name: This script's result
         if: always() && steps.run.outputs.results != ''
         run: |
           python - "${{ steps.run.outputs.results }}" <<'EOF'
           import json, sys
           r = json.load(open(sys.argv[1]))
-          print("Overall Result:", r["overall"])
+          print(r["scripts"][0]["name"] if r["scripts"] else "(no script ran)", r["overall"])
           sys.exit(0 if r["overall"] == "PASS" else 1)
           EOF
+
+  report:
+    needs: [plan, validate]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: MPF-${{ github.event.inputs.contract }}-*-Reports
+          path: collected
+      - name: Combined summary and overall result
+        run: python tools/aggregate.py collected "$CONTRACT" "${{ needs.plan.outputs.expected }}"

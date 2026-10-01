@@ -1,7 +1,7 @@
 """
 Run every validation script in scripts/ against one contract's ZIP.
 
-    python tools/run_validations.py H1625
+    python tools/run_validations.py H1625 [--only check_hyLOCAL.py]
 
 1. locate input/<C>/<C>.zip           5. run each script (a failure never stops the rest)
 2. extract to work/<C>/extracted      6. collect each script's reports into
@@ -92,9 +92,15 @@ def list_files(folder):
 
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("usage: run_validations.py <CONTRACT_ID>")
-    contract = sys.argv[1].strip().upper()
+    argv = sys.argv[1:]
+    only = None
+    if "--only" in argv:
+        i = argv.index("--only")
+        only = argv[i + 1] if i + 1 < len(argv) else ""
+        del argv[i:i + 2]
+    if len(argv) != 1:
+        sys.exit("usage: run_validations.py <CONTRACT_ID> [--only <script.py>]")
+    contract = argv[0].strip().upper()
     contracts = load_json(os.path.join(ROOT, "config", "contracts.json"), {})
     cfg = load_json(os.path.join(ROOT, "config", "validators.json"), {})
     defaults = cfg.get("defaults", {})
@@ -162,6 +168,10 @@ def main():
 
     # ---- 5-6: run every script, independently
     scripts = discover_scripts(cfg)
+    if only:
+        scripts = [x for x in scripts if x["name"] == only]
+        if not scripts:
+            res["notes"].append("Script not found in scripts/: %s" % only)
     print("Discovered %d validation script(s): %s" % (len(scripts), ", ".join(s["name"] for s in scripts)))
     for s in scripts:
         out_dir = os.path.join(run_dir, os.path.splitext(s["name"])[0])

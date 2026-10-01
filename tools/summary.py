@@ -34,7 +34,7 @@ def render(r):
         L.append("")
     for n in r["notes"]:
         L.append("> ⚠️ %s" % n)
-    L += ["", "Reports: `%s` (artifact **MPF-%s-Validation-Reports**)" % (r["run_dir"], r["contract"]),
+    L += ["", "Artifacts: **MPF-%s-<script>-Reports** (one per validation script)" % r["contract"],
           "", "_Nothing was deleted. Use the **MPF Manual Cleanup** workflow to delete the ZIP or JSON._"]
     return "\n".join(L) + "\n"
 
