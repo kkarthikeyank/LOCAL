@@ -81,6 +81,8 @@ Drop `scripts/<anything>.py` (not starting with `_`; helpers should be named `_h
 
 `mpf_auditLOCAL.py`'s email comes from `MApalnE2E` (`scripts/email_report.py`, `tools/audit_email.py`): a banner, contract/plan-year/exit-code table, findings totals by level, and the top error codes with sample rows, all read from the real `findings_<C>.csv`. A script crash (exit code other than 0/1) sends the "AUTOMATION FAILURE" version with the log tail. It attaches the Word report and `findings_<C>.csv` (MApalnE2E produces no Excel file for this script).
 
+The `validate_maLOCAL.py` email follows maplancopy's `mpf_monitor.py` logic: result is COMPLETED / FAILED / DOWNLOAD FAILURE / SCRIPT FAILURE (warning-only codes such as P1004 do not fail the run), a stage table (Download files, Parse JSON, Reference, FHIR, Business validation), attachments `<C>_contract_summary_<date>.docx` and `<C>_validation_report_<date>.xlsx` (zipped if over the 14 MB cap), and the same stage table and failed-checks table in the job summary.
+
 ## Changes made to your scripts (logic untouched)
 - `check_hyLOCAL.py`: reads JSON from `$INPUT_DIR` when set; exits 1 if dangling references exist; plus the maplan report features above.
 - `mpf_auditLOCAL.py`: local file pattern `chpw-<C>-*` became `*-<C>-*` (JHP files are `jhp-...`); `--local` accepts contracts not in `INDEX_URLS` (e.g. H1625).

@@ -151,3 +151,45 @@ def build(ctx):
                      f"(expected: {x['expected'] or '--'} | actual: {x['actual'] or '--'})")
     lines += ["", "Report: " + ", ".join(names), ctx["run_url"], "", "Thanks,", "QA team"]
     return html, "\n".join(lines), subject
+
+
+# ---- result classification and stage table (from maplancopy scripts/mpf_monitor.py) ----
+DOWNLOAD_CODES = {"C4001", "C4002", "C4003"}          # could not reach/download the data
+STAGE_CODES = [                                        # console "stage" -> error-code prefixes
+    ("Download files", ("C4001", "C4002", "C4003", "C4011", "C4012", "C4013", "C4014", "P1017")),
+    ("Parse JSON", ("C4004", "C4015", "C4016", "C4017", "C4018", "N3015")),
+    ("Reference validation", ("F5001", "F5002", "F5003", "F5004", "F5005", "F5006", "F5007", "F5008", "F5009")),
+    ("FHIR validation", ("A2001", "A2002", "A2003", "A2004", "A2005", "A2006", "A2007", "A2008", "A2009", "A2010", "P1013", "P1014")),
+    ("Business validation", ("N3001", "N3002", "N3003", "N3004", "N3005", "N3006", "N3007", "N3008", "N3011", "N3012", "N3013", "N3014",
+                              "P1001", "P1004", "P1006", "P1007", "P1008", "P1009", "P1010", "P1011", "P1012", "P1016", "P1018")),
+]
+
+
+def classify(status_json, have_files):
+    """COMPLETED / FAILED (data issues) / DOWNLOAD_FAILURE / SCRIPT_FAILURE (no result or no report).
+    Warning-only failing codes (e.g. P1004) do not make the run FAILED."""
+    if status_json is None or not have_files:
+        return "SCRIPT_FAILURE"
+    failing = [c for c in status_json["codes"] if c["status"] == "FAIL_SEEN"]
+    if any(c["code"] in DOWNLOAD_CODES for c in failing):
+        return "DOWNLOAD_FAILURE"
+    if any(not c["warning_only"] for c in failing):
+        return "FAILED"
+    return "COMPLETED"
+
+
+def stages_from(status_json, script_ok):
+    out = []
+    codes = (status_json or {}).get("codes", [])
+    failing = {c["code"] for c in codes if c["status"] == "FAIL_SEEN" and not c["warning_only"]}
+    tested = {c["code"] for c in codes}
+    for name, group in STAGE_CODES:
+        if not script_ok or not status_json:
+            out.append((name, "NOT RUN"))
+        elif failing & set(group):
+            out.append((name, "FAIL"))
+        elif tested & set(group):
+            out.append((name, "PASS"))
+        else:
+            out.append((name, "N/A"))
+    return out

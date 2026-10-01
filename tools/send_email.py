@@ -76,32 +76,62 @@ def log_tail(s, n=25):
         return "(no log)"
 
 
-def status_email(r, s, files, run_url):
-    """validate_maLOCAL.py: maplancopy-style status email built from run_status_<C>.json."""
+def ma_prepare(r, s, budget_mb=14):
+    """validate_maLOCAL.py attachments, as maplancopy: <C>_contract_summary_<date>.docx and
+    <C>_validation_report_<date>.xlsx (zipped if too big; 14 MB cap), copied next to the originals."""
+    import shutil
+    import zipfile
+    from datetime import datetime, timezone
+    c, base = r["contract"], os.path.join(ROOT, s["folder"])
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    docx_src = os.path.join(base, "contract_summary_%s.docx" % c)
+    xlsx_src = next((os.path.join(base, f) for f in s["report_files"]
+                     if f.startswith("validation_report_") and f.endswith(".xlsx")), None)
+    have = os.path.exists(docx_src) and xlsx_src is not None
+    files, note = [], ""
+    if have:
+        docx_dst = "%s_contract_summary_%s.docx" % (c, today)
+        xlsx_dst = "%s_validation_report_%s.xlsx" % (c, today)
+        shutil.copy(docx_src, os.path.join(base, docx_dst))
+        shutil.copy(xlsx_src, os.path.join(base, xlsx_dst))
+        files.append(docx_dst)
+        room = int(budget_mb * 1048576) - os.path.getsize(os.path.join(base, docx_dst))
+        if os.path.getsize(os.path.join(base, xlsx_dst)) <= room:
+            files.append(xlsx_dst)
+        else:
+            zip_dst = xlsx_dst[:-5] + ".zip"
+            with zipfile.ZipFile(os.path.join(base, zip_dst), "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                z.write(os.path.join(base, xlsx_dst), xlsx_dst)
+            if os.path.getsize(os.path.join(base, zip_dst)) <= room:
+                files.append(zip_dst)
+            else:
+                note = "The Excel validation report is too large to attach; download it from the workflow run."
+    return files, have, note
+
+
+def status_email(r, s, files, run_url, have_files=True, note=""):
+    """validate_maLOCAL.py: maplancopy status email built from run_status_<C>.json."""
     st = None
     try:
         with open(os.path.join(ROOT, s["folder"], "run_status_%s.json" % r["contract"]), encoding="utf-8") as f:
             st = json.load(f)
     except (OSError, ValueError):
         pass
-    if s["status"] == "PASS":
-        result = "COMPLETED"
-    elif st and st.get("checks_failed"):
-        result = "FAILED"          # ran fine, data has failing checks
-    else:
-        result = "SCRIPT_FAILURE"  # crashed / no result file
+    result = mpf_status_email.classify(st, have_files)
+    stages = mpf_status_email.stages_from(st, st is not None)
+    stages.append(("Generate report", "PASS" if have_files else "FAIL"))
     ctx = {
         "contract": r["contract"], "result": result, "mode": "manual", "status": st,
         "plan_year": os.environ.get("PLAN_YEAR", "2027"), "actor": os.environ.get("GITHUB_ACTOR", ""),
-        "previous": "", "current": "", "elapsed": int(s["seconds"]),
-        "stages": [("ZIP extraction", r["extraction"]), ("JSON discovery", "PASS" if r["json_count"] else "FAIL"),
-                   ("Validation script (%s)" % s["name"], "PASS" if result != "SCRIPT_FAILURE" else "FAIL"),
-                   ("Report generation", "PASS" if s["report_files"] else "FAIL")],
+        "previous": "", "current": "", "elapsed": int(s["seconds"]), "stages": stages,
         "report_names": [os.path.basename(f) for f in files], "run_url": run_url or "n/a",
-        "artifact_note": "", "other_statuses": {},
-        "log_tail": log_tail(s, 40) if result == "SCRIPT_FAILURE" else "",
+        "artifact_note": note, "other_statuses": {},
+        "log_tail": log_tail(s, 15) if result == "SCRIPT_FAILURE" else "",
     }
     html, text, _ = mpf_status_email.build(ctx)
+    with open(os.path.join(ROOT, s["folder"], "%s_validation_%s.html" % (r["contract"], __import__("datetime").date.today())),
+              "w", encoding="utf-8") as f:
+        f.write(html)
     return html, text
 
 
@@ -182,7 +212,8 @@ def main():
             }
             plain = None
             if s["name"] == "validate_maLOCAL.py":     # maplancopy-style status email
-                html, plain = status_email(r, s, files, run_url)
+                files, have, note = ma_prepare(r, s)
+                html, plain = status_email(r, s, files, run_url, have, note)
             elif s["name"] == "mpf_auditLOCAL.py":     # MApalnE2E-style findings email
                 html, plain = audit_status_email(r, s, files, run_url)
             else:

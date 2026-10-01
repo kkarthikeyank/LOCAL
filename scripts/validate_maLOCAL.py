@@ -4100,7 +4100,9 @@ def main():
     # ---- console summary (expected vs actual, tagged with Appendix E codes) ----
     CODE_RE = re.compile(r"\[([A-Z]\d{4})\]")
     fails = [r for r in rows[1:] if r[12] == "FAIL"]
-    _FAILED_CHECKS.extend(fails)
+    # warning-only codes (WARNING_ONLY_CODES, e.g. P1004) are reported but do not fail the run
+    _FAILED_CHECKS.extend(r for r in fails
+                          if (CODE_RE.search(r[11]) or [None, None])[1] not in WARNING_ONLY_CODES)
     passes = [r for r in rows[1:] if r[12] == "PASS"]
     print("\n" + "=" * 60)
     print(f"SUMMARY: {len(passes)} checks passed, {len(fails)} checks failed")

@@ -12,6 +12,7 @@ import os
 import sys
 
 import summary
+import mpf_status_email
 
 d, contract, expected = sys.argv[1], sys.argv[2], [e for e in sys.argv[3].split(",") if e]
 parts = []
@@ -44,6 +45,18 @@ m = {"contract": contract, "zip_path": "input/%s/%s.zip" % (contract, contract),
      "notes": sorted(set(notes)), "run_dir": ""}
 m["overall"] = "PASS" if ok and total and passed == total and m["json_count"] > 0 else "FAIL"
 text = summary.render(m)
+# validate_maLOCAL.py: stage table + failed checks (as maplancopy's job summary)
+for p in glob.glob(os.path.join(d, "**", "run_status_*.json"), recursive=True):
+    with open(p, encoding="utf-8") as f:
+        st = json.load(f)
+    text += "\n### validate_maLOCAL.py stages\n\n```\n"
+    text += "\n".join("%-30s %s" % x for x in mpf_status_email.stages_from(st, True)) + "\n```\n"
+    failing = [x for x in st["codes"] if x["status"] == "FAIL_SEEN"]
+    if failing:
+        text += "\n**Failed checks**\n\n| Code | Name | Failing records | Failed resource types |\n|---|---|---|---|\n"
+        text += "".join("| %s | %s | %s | %s%s |\n" % (
+            x["code"], x["name"], x["failing_records"] or x["fail_count"], x["failed_resource_types"],
+            " (warning)" if x["warning_only"] else "") for x in failing)
 t = os.environ.get("GITHUB_STEP_SUMMARY")
 if t:
     open(t, "a", encoding="utf-8").write(text)
