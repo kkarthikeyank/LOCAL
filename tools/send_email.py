@@ -29,6 +29,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_html_report import build_html_report  # noqa: E402  (ported from maplan)
 import mpf_status_email  # noqa: E402  (ported from maplancopy; used for validate_maLOCAL.py)
+import audit_email  # noqa: E402  (ported from MApalnE2E; used for mpf_auditLOCAL.py)
+from types import SimpleNamespace  # noqa: E402
 TPL = os.path.join(ROOT, "email_templates")
 
 
@@ -103,6 +105,24 @@ def status_email(r, s, files, run_url):
     return html, text
 
 
+def audit_status_email(r, s, files, run_url):
+    """mpf_auditLOCAL.py: MApalnE2E-style findings email built from findings_<C>.csv."""
+    folder = os.path.join(ROOT, s["folder"])
+    csv_path = os.path.join(folder, "findings_%s.csv" % r["contract"])
+    # exit 0 = no fatal findings, 1 = fatal findings (both are real results); anything else = crash
+    crashed = s["exit_code"] not in (0, 1) or bool(s["note"])
+    kind = "automation-crash" if crashed else "manual-run"
+    docx = next((f for f in files if f.lower().endswith(".docx")), "")
+    args = SimpleNamespace(
+        kind=kind, contract=r["contract"], plan_year=os.environ.get("PLAN_YEAR", "2027"),
+        run_mode="manual", previous_last_updated="", new_last_updated="",
+        exit_code=str(s["exit_code"]), report_path=docx, csv_path=csv_path,
+        error_detail=(s["note"] + "\n" if s["note"] else "") + log_tail(s, 40) if crashed else "")
+    summary = None if crashed else audit_email.summarize_findings_csv(csv_path)
+    _, text, html = audit_email.build_message(args, summary)
+    return html, text
+
+
 def li(items):
     return "<ul>%s</ul>" % "".join("<li>%s</li>" % escape(i) for i in items) if items else "<p>none</p>"
 
@@ -163,6 +183,8 @@ def main():
             plain = None
             if s["name"] == "validate_maLOCAL.py":     # maplancopy-style status email
                 html, plain = status_email(r, s, files, run_url)
+            elif s["name"] == "mpf_auditLOCAL.py":     # MApalnE2E-style findings email
+                html, plain = audit_status_email(r, s, files, run_url)
             else:
                 tpl = template_for(s["name"])
                 if "{{html_report}}" in tpl:      # full report tables inline, like maplan

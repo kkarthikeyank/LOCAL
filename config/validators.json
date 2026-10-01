@@ -14,7 +14,7 @@
     "order": 2,
     "label": "CMS Technical Guide Audit (mpf_audit)",
     "args": ["--local", "--local-dir", "{input_dir}", "--out", "{output_dir}", "--cache", "{cache_dir}", "--contracts", "{contract}"],
-    "attach": ["*.docx", "findings_*.csv"]
+    "attach": ["*.docx", "findings_*.csv", "*.xlsx"]
   },
   "validate_maLOCAL.py": {
     "order": 3,
