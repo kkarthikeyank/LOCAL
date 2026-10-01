@@ -77,10 +77,12 @@ Drop `scripts/<anything>.py` (not starting with `_`; helpers should be named `_h
 ## Ported from the `maplan` repo
 `check_hyLOCAL.py` now also produces what `maplan/check_refs.py` produced: `reference_integrity_contract_<C>_report.xlsx` and `.docx`, `resource_counts_<C>.csv`, and orphan name/type/flag columns. Its email shows the same full report tables inline in the email body (`tools/build_html_report.py`, copied from maplan) and attaches the Excel and Word reports. The other two scripts keep their own Word/CSV reports as attachments.
 
+`validate_maLOCAL.py` + its email come from `maplancopy` (`validate_2.py`, `scripts/email_report.py`): it now also writes `run_status_<C>.json` and merges all its CSVs into one `validation_report_<C>_local.xlsx` (the loose CSVs are removed, as in maplancopy). Its email is the maplancopy HTML status email (COMPLETED / FAILED / SCRIPT FAILURE banner, stage table, failed checks with expected vs actual, passed checks, report list) with the Excel and Word reports attached (`tools/mpf_status_email.py`).
+
 ## Changes made to your scripts (logic untouched)
 - `check_hyLOCAL.py`: reads JSON from `$INPUT_DIR` when set; exits 1 if dangling references exist; plus the maplan report features above.
 - `mpf_auditLOCAL.py`: local file pattern `chpw-<C>-*` became `*-<C>-*` (JHP files are `jhp-...`); `--local` accepts contracts not in `INDEX_URLS` (e.g. H1625).
-- `validate_maLOCAL.py`: exits 1 if any check failed (previously always 0).
+- `validate_maLOCAL.py`: exits 1 if any check failed (previously always 0); plus the maplancopy status JSON and Excel bundling above.
 
 ## Troubleshooting
 | Symptom | Fix |

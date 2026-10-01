@@ -4054,6 +4054,7 @@ _FAILED_CHECKS = []   # filled by main(); drives the process exit code
 
 
 def main():
+    run_started = time.time() - 1
     plans = PLANS
     out_path = "ma_directory_validation_report.csv"
     local_mode = False
@@ -4150,6 +4151,121 @@ def main():
                                                     source_desc, local_mode)
             if audit_docx:
                 print(f"Dynamic audit report written to: {audit_docx}")
+
+    # Machine-readable result per contract, read by the GitHub Actions email builder
+    # (ported from maplancopy). JSON, so the xlsx bundling below leaves it in place.
+    for (org, contract), summary in plan_summaries.items():
+        jf = write_run_status_json(cov_path, org, contract, summary or {}, rows)
+        if jf:
+            print(f"Run status JSON written to: {jf}")
+
+    # Fold every CSV this run produced into ONE workbook and remove the loose files.
+    bundle_csvs_into_xlsx(run_started, f"validation_report_{label}.xlsx")
+
+
+def write_run_status_json(cov_path, org, contract, summary, rows):
+    """run_status_<contract>.json -- the per-contract result the automation reads:
+    check totals, fatal counts, and one entry per Appendix E code with its
+    status, fail/pass counts, failed vs passed resource types, and an
+    expected/actual example. Returns the filename, or None if no data."""
+    data = _gather_contract_summary_data(cov_path, contract, summary)
+    if data is None:
+        return None
+    mine = [r for r in rows[1:] if r[1] == contract]
+    codes = []
+    for r in data["codes"]:
+        if r["status"] not in ("FAIL_SEEN", "PASS_ONLY"):
+            continue
+        codes.append({
+            "code": r["error_code"], "level": int(r["level"]), "name": r["bug_title"],
+            "status": r["status"], "pass_count": int(r["pass_count"] or 0), "fail_count": int(r["fail_count"] or 0),
+            "failing_records": int(r.get("failing_record_count") or 0),
+            "failed_resource_types": r.get("failed_resource_types", "--"),
+            "passed_resource_types": r.get("passed_resource_types", "--"),
+            "example": _example_identifier_cell(r),
+            "expected": (r.get("expected") or "").strip(), "actual": (r.get("actual") or "").strip(),
+            "warning_only": r["error_code"] in WARNING_ONLY_CODES,
+        })
+    out = {
+        "contract": contract, "org": org,
+        "checks_passed": sum(1 for r in mine if r[12] == "PASS"),
+        "checks_failed": sum(1 for r in mine if r[12] == "FAIL"),
+        "fatal_fail": summary.get("fatal_fail_n"), "fatal_pass": summary.get("fatal_pass_n"),
+        "placeholder_count": summary.get("placeholder_count"),
+        "status_counts": dict(data["status_counts"]),
+        "codes": codes,
+    }
+    fname = f"run_status_{contract}.json"
+    with open(fname, "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=2)
+    return fname
+
+
+_ILLEGAL_XLSX_RE = re.compile(r"[\000-\010\013\014\016-\037]")
+
+
+def bundle_csvs_into_xlsx(since_ts, xlsx_name):
+    """Merge every CSV in the working directory written at/after `since_ts`
+    into a single .xlsx (one sheet per CSV), then delete those CSVs.
+    The CSVs are left in place if openpyxl is missing or saving fails."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+    except ImportError:
+        print("NOTE: openpyxl is not installed -- leaving CSV files as-is "
+              "(pip install openpyxl to get a single Excel workbook).")
+        return
+    files = [f for f in os.listdir(".")
+             if f.lower().endswith(".csv") and os.path.getmtime(f) >= since_ts]
+    if not files:
+        return
+
+    def priority(f):
+        if f.startswith("end_to_end_summary_"):
+            return (0, f)
+        if f.startswith("ma_directory_validation_report") and "_appendix_e_coverage" not in f:
+            return (1, f)
+        if "_appendix_e_coverage" in f:
+            return (2, f)
+        if f.startswith(("appendix_b_summary_", "resource_file_summary_", "fatal_error_summary_", "findings_")):
+            return (3, f)
+        return (4, f)
+    files.sort(key=priority)
+
+    wb = Workbook(write_only=True)
+    used = set()
+    max_rows = 1_048_576
+    for f in files:
+        stem = re.sub(r"[\\/*?:\[\]]", "_", os.path.splitext(f)[0])
+        name, n = stem[:31], 1
+        while name.lower() in used:
+            n += 1
+            suffix = f"~{n}"
+            name = stem[:31 - len(suffix)] + suffix
+        used.add(name.lower())
+        ws = wb.create_sheet(title=name)
+        with open(f, newline="", encoding="utf-8") as fh:
+            for i, row in enumerate(csv.reader(fh)):
+                if i >= max_rows:
+                    print(f"WARNING: {f} exceeds Excel's row limit; truncated in the workbook.")
+                    break
+                cells = []
+                for v in row:
+                    c = WriteOnlyCell(ws, value=_ILLEGAL_XLSX_RE.sub("", v))
+                    c.data_type = "s"   # keep text like "=..." from becoming a formula
+                    cells.append(c)
+                ws.append(cells)
+    try:
+        wb.save(xlsx_name)
+    except Exception as e:
+        print(f"WARNING: could not write {xlsx_name} ({e}) -- leaving CSV files as-is.")
+        return
+    for f in files:
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    print(f"\nExcel workbook written to: {xlsx_name}  ({len(files)} sheets; CSV files merged and removed)")
 
 
 CODE_RE = re.compile(r"\[([A-Z]\d{4})\]")
