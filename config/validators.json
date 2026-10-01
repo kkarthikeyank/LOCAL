@@ -8,7 +8,7 @@
     "order": 1,
     "label": "Reference Integrity Check (check_hy)",
     "args": ["{contract}"],
-    "attach": ["dangling_summary_*.csv", "placeholder_refs_*.csv", "orphan_refs_*.csv", "dangling_refs_*.csv"]
+    "attach": ["*.xlsx", "*.docx", "dangling_summary_*.csv", "placeholder_refs_*.csv", "orphan_refs_*.csv", "dangling_refs_*.csv"]
   },
   "mpf_auditLOCAL.py": {
     "order": 2,

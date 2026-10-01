@@ -15,6 +15,7 @@ Outputs (per contract):
   dangling_summary_<C>.csv   affected counts + % per source type -> target type
 """
 import json, csv, re, os, sys, glob
+from datetime import date
 
 
 
@@ -35,6 +36,14 @@ def has_placeholder_extension(resource):
         if ext.get("url") == PLACEHOLDER_EXT_URL and ext.get("valueBoolean") is True:
             return True
     return False
+
+EXPECTED_ORPHAN_TYPES = {"payer", "network", "ntwk"}
+
+
+def is_expected_orphan_type(type_str):
+    low = (type_str or "").lower()
+    return any(t in low for t in EXPECTED_ORPHAN_TYPES)
+
 
 PLACEHOLDER_LITERALS = {
     "test", "example", "unknown", "tbd", "n/a", "na", "none", "null",
@@ -140,6 +149,7 @@ def run(contract, folder):
     print("Pass 1: indexing existing resource ids ...", flush=True)
     existing = set()
     identifiers = {}              # (resourceType, id) -> "system|value" identifiers, joined by "; "
+    org_meta = {}                  # (resourceType, id) -> {"name": ..., "type": "Payer; Network"}
     raw_type_counts = {}          # includes duplicate ids (raw entry count)
     ext_placeholder_by_file = {}  # fname -> count of resources with resource-placeholder ext
     for path, fname, category, part in files:
@@ -154,6 +164,28 @@ def run(contract, folder):
                           for i in (r.get("identifier") or []) if isinstance(i, dict)]
                 if idents:
                     identifiers[(rt, str(rid))] = "; ".join(idents)
+                if rt in ("Organization", "Practitioner"):
+                    type_labels = []
+                    for t in (r.get("type") or []):
+                        if not isinstance(t, dict):
+                            continue
+                        if t.get("text"):
+                            type_labels.append(t["text"])
+                        for coding in t.get("coding", []) or []:
+                            if coding.get("display"):
+                                type_labels.append(coding["display"])
+                            elif coding.get("code"):
+                                type_labels.append(coding["code"])
+                    name = r.get("name")
+                    if isinstance(name, list):  # Practitioner.name is HumanName[]
+                        name = " ".join(
+                            " ".join(n.get("given", []) + [n.get("family", "")])
+                            for n in name if isinstance(n, dict)
+                        ).strip()
+                    org_meta[(rt, str(rid))] = {
+                        "name": name or "",
+                        "type": "; ".join(dict.fromkeys(type_labels)),
+                    }
             if has_placeholder_extension(r):
                 ext_placeholder_by_file[fname] = ext_placeholder_by_file.get(fname, 0) + 1
             n += 1
@@ -172,6 +204,13 @@ def run(contract, folder):
     dups = sum(raw_type_counts[t] - type_counts.get(t, 0) for t in raw_type_counts)
     print(f"Indexed {len(existing)} unique resources"
           f"{f' ({dups} duplicate ids collapsed)' if dups else ''}.", flush=True)
+
+    # ---- Write resource counts (total published per type, from the source JSON) ----
+    with open(f"resource_counts_{contract}.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["resource_type", "unique_count", "raw_count"])
+        for t in sorted(type_counts):
+            w.writerow([t, type_counts[t], raw_type_counts.get(t, type_counts[t])])
 
     # ---- Pass 2: check every reference ----
     print("Pass 2: checking references ...", flush=True)
@@ -371,27 +410,349 @@ def run(contract, folder):
         referenced = referenced_ids.get(key, set())
         all_ids = {rid for (rt, rid) in existing if rt == tgt_type}
         orphans = sorted(all_ids - referenced)
-        if not all_ids:
+        if not all_ids or not orphans:
             continue
         print(f"\n--- {contract}: {tgt_type} not referenced by any {ref_src_type}.{field} ---")
         print(f"{len(orphans):,} of {len(all_ids):,} {tgt_type} resources are orphaned "
               f"({100.0 * len(orphans) / len(all_ids):.2f}%)")
         for oid in orphans:
+            meta = org_meta.get((tgt_type, oid), {})
+            otype = meta.get("type", "")
+            flag = "Expected" if is_expected_orphan_type(otype) else "Review"
             orphan_rows.append([tgt_type, oid, identifiers.get((tgt_type, oid), ""),
+                                 meta.get("name", ""), otype, flag,
                                  ref_src_type, field])
 
     if orphan_rows:
         with open(f"orphan_refs_{contract}.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["orphan_type", "orphan_id", "identifier",
+            w.writerow(["orphan_type", "orphan_id", "identifier", "name", "org_type", "flag",
                         "expected_referencing_type", "expected_field"])
             w.writerows(orphan_rows)
+
+    # ---- Console: the two headline connectivity checks only ----
+    org_orphan_n = sum(1 for r in orphan_rows
+                        if r[0] == "Organization" and r[6] == "OrganizationAffiliation"
+                        and r[7] == "organization")
+    prac_orphan_n = sum(1 for r in orphan_rows
+                         if r[0] == "Practitioner" and r[6] == "PractitionerRole"
+                         and r[7] == "practitioner")
+    print(f"\nOrphan Connectivity Checks")
+    print(f"Organization is connected to OrganizationAffiliation"
+          + (f" - ({org_orphan_n:,} orphaned)" if org_orphan_n else ""))
+    print(f"Practitioner is connected to PractitionerRole"
+          + (f" - ({prac_orphan_n:,} orphaned)" if prac_orphan_n else ""))
 
     print(f"\nTotal dangling references: {len(dangling):,}")
     print(f"Wrote: dangling_refs_{contract}.csv, dangling_summary_{contract}.csv"
           + (f", placeholder_refs_{contract}.csv" if placeholder_refs else "")
           + (f", orphan_refs_{contract}.csv" if orphan_rows else ""))
     return len(dangling)
+
+
+def _read_csv(path):
+    if not os.path.exists(path):
+        return [], []
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    return (rows[0], rows[1:]) if rows else ([], [])
+
+
+def build_report(contracts):
+    """After each contract's own run has written its CSVs, roll them into one
+    manager-facing report: an Excel workbook (per-contract detail tabs) and a
+    Word summary. Each contract's numbers still come from its own separate run;
+    this just collates the already-written per-contract outputs."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+        from docx import Document
+    except ImportError as e:
+        print(f"\nSkipping report generation (missing dependency: {e}). "
+              f"Run: pip install openpyxl python-docx")
+        return
+
+    # Dynamic filename driven by whichever contract(s) were actually run, e.g.
+    # reference_integrity_contract_H5826_report.xlsx for one contract, or
+    # reference_integrity_contract_H1619_H3124_report.xlsx for several.
+    report_base = "reference_integrity_contract_" + "_".join(contracts) + "_report"
+
+    data = {}
+    for c in contracts:
+        shdr, srows = _read_csv(f"dangling_summary_{c}.csv")
+        ohdr, orows = _read_csv(f"orphan_refs_{c}.csv")
+        chdr, crows = _read_csv(f"resource_counts_{c}.csv")
+        phdr, prows = _read_csv(f"placeholder_refs_{c}.csv")
+        total_dangling = sum(int(r[5]) for r in srows) if srows else 0
+        total_affected = sum(int(r[6]) for r in srows) if srows else 0
+        # placeholder rollup by target resource type: total seen, connected, dangling
+        ph_by_type = {}
+        for row in prows:
+            _, _, _, _, tgt_type, _, connected = row
+            e = ph_by_type.setdefault(tgt_type, {"total": 0, "connected": 0})
+            e["total"] += 1
+            if connected == "yes":
+                e["connected"] += 1
+        # Fully dynamic: group orphan rows by the actual (orphan_type -> referencing
+        # relationship) they belong to, whatever those turn out to be -- not a
+        # hardcoded Organization/Practitioner pair. Column 4 (org_type / e.g.
+        # Payer, Network) explains *why* each group is orphaned.
+        conn_checks = {}
+        for r in orows:
+            orphan_type, _, _, _, otype, flag, ref_type, field = r[:8]
+            key = (orphan_type, ref_type, field)
+            e = conn_checks.setdefault(key, {"count": 0, "types": {}, "review": []})
+            e["count"] += 1
+            if otype:
+                e["types"][otype] = e["types"].get(otype, 0) + 1
+            if flag == "Review":
+                e["review"].append(r)
+        data[c] = dict(shdr=shdr, srows=srows, ohdr=ohdr, orows=orows,
+                        crows=crows, ph_by_type=ph_by_type,
+                        total_dangling=total_dangling, total_affected=total_affected,
+                        conn_checks=conn_checks)
+
+    grand_dangling = sum(d["total_dangling"] for d in data.values())
+    grand_orphans = sum(len(d["orows"]) for d in data.values())
+
+    # ---- Excel ----
+    wb = Workbook()
+    HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
+    HEADER_FONT = Font(color="FFFFFF", bold=True)
+    BAD_FILL = PatternFill("solid", fgColor="FCE4E4")
+    OK_FILL = PatternFill("solid", fgColor="E4F7E4")
+
+    def style_header(ws, row=1, ncols=1):
+        for col in range(1, ncols + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    def autosize(ws, ncols):
+        for col in range(1, ncols + 1):
+            letter = get_column_letter(col)
+            maxlen = max((len(str(c.value)) if c.value is not None else 0)
+                         for c in ws[letter])
+            ws.column_dimensions[letter].width = min(max(maxlen + 2, 10), 60)
+
+    ws = wb.active
+    ws.title = "Overview"
+    ws.append(["FHIR Provider Directory - Reference Integrity Report"])
+    ws["A1"].font = Font(size=14, bold=True)
+    ws.append([f"Generated: {date.today().isoformat()}"])
+    ws.append([])
+    ws.append(["Contract", "Dangling References", "Orphaned Organizations",
+               "Total Referenced Resources", "Status"])
+    style_header(ws, row=4, ncols=5)
+    for c in contracts:
+        d = data[c]
+        total_refs = sum(int(r[4]) for r in d["srows"]) if d["srows"] else 0
+        status = "CLEAN" if d["total_dangling"] == 0 else "ISSUES FOUND"
+        ws.append([c, d["total_dangling"], len(d["orows"]), total_refs, status])
+        r = ws.max_row
+        fill = OK_FILL if d["total_dangling"] == 0 else BAD_FILL
+        for col in range(1, 6):
+            ws.cell(row=r, column=col).fill = fill
+    ws.append([])
+    ws.append(["TOTAL (all contracts)", grand_dangling, grand_orphans])
+    ws[f"A{ws.max_row}"].font = Font(bold=True)
+    autosize(ws, 5)
+
+    for c in contracts:
+        d = data[c]
+        wsum = wb.create_sheet(f"{c} Summary")
+        if d["shdr"]:
+            wsum.append(d["shdr"])
+            style_header(wsum, row=1, ncols=len(d["shdr"]))
+            for row in d["srows"]:
+                wsum.append(row)
+                rr = wsum.max_row
+                if int(row[5]) > 0:
+                    for col in range(1, len(d["shdr"]) + 1):
+                        wsum.cell(row=rr, column=col).fill = BAD_FILL
+            autosize(wsum, len(d["shdr"]))
+        wsum.freeze_panes = "A2"
+
+        worp = wb.create_sheet(f"{c} Orphans")
+        if d["ohdr"]:
+            worp.append(d["ohdr"])
+            style_header(worp, row=1, ncols=len(d["ohdr"]))
+            for row in d["orows"]:
+                worp.append(row)
+            autosize(worp, len(d["ohdr"]))
+        else:
+            worp.append(["No orphaned resources found."])
+        worp.freeze_panes = "A2"
+
+    xlsx_path = f"{report_base}.xlsx"
+    wb.save(xlsx_path)
+
+    # ---- Word ----
+    def add_table(doc, headers, rows, style="Light Grid Accent 1"):
+        t = doc.add_table(rows=1, cols=len(headers))
+        t.style = style
+        for i, h in enumerate(headers):
+            cell = t.rows[0].cells[i]
+            cell.text = h
+            cell.paragraphs[0].runs[0].font.bold = True
+        for row in rows:
+            cells = t.add_row().cells
+            for i, v in enumerate(row):
+                cells[i].text = str(v)
+        return t
+
+    today_str = date.today().strftime("%d-%b-%Y")
+
+    doc = Document()
+    doc.add_heading("Reference Integrity Validation Report", level=0)
+    doc.add_paragraph(f"Execution Date: {today_str}")
+    doc.add_paragraph("Validation Type: Forward Reference / Dangling Reference Validation")
+    p = doc.add_paragraph()
+    p.add_run("Contracts covered: ").bold = True
+    p.add_run(", ".join(contracts))
+
+    overall_status = "PASS" if grand_dangling == 0 else "FAIL"
+    doc.add_heading("1. Overall Summary", level=1)
+    add_table(doc, ["Metric", "Result"], [
+        ["Execution Date", today_str],
+        ["Environment", "Production"],
+        ["Validation Type", "Forward Reference / Dangling Reference"],
+        ["Contracts Validated", len(contracts)],
+        ["Dangling References", f"{grand_dangling:,}"],
+        ["Affected Source Resources",
+         f"{sum(d['total_affected'] for d in data.values()):,}"],
+        ["Orphaned Organizations", f"{grand_orphans:,}"],
+        ["Reference Integrity", overall_status],
+    ])
+
+    for c in contracts:
+        d = data[c]
+        status = "PASS" if d["total_dangling"] == 0 else "FAIL"
+        n_relationships = len(d["srows"])
+
+        doc.add_heading(f"Contract: {c}", level=1)
+
+        doc.add_heading("1. Execution Summary", level=2)
+        add_table(doc, ["Metric", "Result"], [
+            ["Execution Date", today_str],
+            ["Environment", "Production"],
+            ["Validation Type", "Forward Reference / Dangling Reference"],
+            ["Relationship Checks", n_relationships],
+            ["Dangling References", f"{d['total_dangling']:,}"],
+            ["Affected Source Resources", f"{d['total_affected']:,}"],
+            ["Reference Integrity", status],
+        ])
+
+        doc.add_heading("2. Validation Results", level=2)
+        vrows = []
+        for row in d["srows"]:
+            src_type, field, tgt_type, tgt_pub, total, bad, aff = row[:7]
+            vrows.append([src_type, field, tgt_type, f"{int(total):,}",
+                          bad, aff, "PASS" if int(bad) == 0 else "FAIL"])
+        add_table(doc, ["Source Type", "Field", "Target Type", "Total References",
+                        "Dangling", "Affected Resources", "Result"], vrows)
+
+        doc.add_heading("3. Resource Counts (Total in JSON)", level=2)
+        if d["crows"]:
+            add_table(doc, ["Resource Type", "Unique Count", "Raw Count"], d["crows"])
+        else:
+            doc.add_paragraph("No resource-count data available for this contract.")
+
+        doc.add_heading("4. Placeholder-Looking Target IDs", level=2)
+        if d["ph_by_type"]:
+            ph_rows = []
+            for tgt_type in sorted(d["ph_by_type"]):
+                e = d["ph_by_type"][tgt_type]
+                dangling_ph = e["total"] - e["connected"]
+                ph_rows.append([tgt_type, e["total"], e["connected"], dangling_ph])
+            add_table(doc, ["Target Type", "Placeholder-Looking", "Connected", "Dangling"],
+                      ph_rows)
+        else:
+            doc.add_paragraph("No placeholder-looking ids found.")
+
+        doc.add_heading("5. Orphan Connectivity Checks", level=2)
+        # Fully dynamic: one line per (orphan_type -> referencing relationship)
+        # actually observed for this contract. An orphan of an EXPECTED_ORPHAN_TYPES
+        # type (e.g. Payer, Network) stays Pass -- it's not meant to be linked.
+        # Anything else is flagged REVIEW so a real gap doesn't hide behind a Pass.
+        any_review = False
+        if d["conn_checks"]:
+            for (orphan_type, ref_type, field), e in sorted(d["conn_checks"].items()):
+                type_note = ""
+                if e["types"]:
+                    breakdown = ", ".join(f"{t}: {n}" for t, n in sorted(e["types"].items()))
+                    type_note = f" -- type(s): {breakdown}"
+                if e["review"]:
+                    any_review = True
+                    status = f"REVIEW ({len(e['review'])} of {e['count']} not an expected type)"
+                else:
+                    status = "Pass"
+                doc.add_paragraph(
+                    f"{orphan_type} is connected to {ref_type}.{field} - "
+                    f"{status} ({e['count']} orphaned{type_note})"
+                )
+                if e["review"]:
+                    rt = doc.add_table(rows=1, cols=4)
+                    rt.style = "Light List Accent 2"
+                    rh = rt.rows[0].cells
+                    for i, h in enumerate(["Orphan ID", "Identifier", "Name", "Type"]):
+                        rh[i].text = h
+                        rh[i].paragraphs[0].runs[0].font.bold = True
+                    for row in e["review"]:
+                        rc = rt.add_row().cells
+                        rc[0].text = row[1]
+                        rc[1].text = row[2]
+                        rc[2].text = row[3]
+                        rc[3].text = row[4] or "(no type)"
+            doc.add_paragraph(
+                "Note: orphans of an expected type (Payer, Network) are normal -- "
+                "those Organization levels are not required to be linked via an "
+                "OrganizationAffiliation record. Any REVIEW line above lists "
+                "orphans of an unexpected type that likely need a data fix. "
+                "See the Orphan Details table below for the full breakdown."
+            )
+        else:
+            doc.add_paragraph("Every published resource is referenced back at least "
+                               "once by its expected relationship - Pass.")
+
+        doc.add_heading("6. Orphan Details", level=2)
+        ORPHAN_TABLE_CAP = 500
+        if d["orows"]:
+            shown = d["orows"][:ORPHAN_TABLE_CAP]
+            add_table(doc, ["Orphan Type", "Orphan ID", "Identifier", "Name",
+                            "Org/Practitioner Type", "Flag",
+                            "Expected Referencing Type", "Expected Field"], shown)
+            if len(d["orows"]) > ORPHAN_TABLE_CAP:
+                doc.add_paragraph(
+                    f"... {len(d['orows']) - ORPHAN_TABLE_CAP:,} more not shown here -- "
+                    f"see orphan_refs_{c}.csv for the full list."
+                )
+        else:
+            doc.add_paragraph("No orphaned resources found for this contract.")
+
+        doc.add_paragraph()
+
+    doc.add_heading("Recommendation", level=1)
+    doc.add_paragraph(
+        "Review the orphaned records above with the data provider to confirm "
+        "whether they are intentionally unaffiliated or should be linked via an "
+        "OrganizationAffiliation / PractitionerRole entry." if grand_orphans else
+        "No follow-up required -- all references resolve and no orphaned "
+        "resources were found."
+    )
+    doc.add_paragraph()
+    foot = doc.add_paragraph()
+    foot.add_run("Full detail (per-reference breakdowns) is available in the "
+                 f"accompanying Excel workbook: {xlsx_path}").italic = True
+
+    docx_path = f"{report_base}.docx"
+    doc.save(docx_path)
+
+    print(f"\nWrote report: {xlsx_path}, {docx_path}")
+
+
 
 
 CONTRACT_DIR_RE = re.compile(r"^[hH]\d+$")
@@ -437,4 +798,5 @@ for c, folder in targets.items():
     grand_total += run(c, folder)
 if len(targets) > 1:
     print(f"\n==== ALL CONTRACTS: {grand_total:,} total dangling references ====")
+build_report(list(targets))   # Excel + Word report (ported from maplan check_refs.py)
 sys.exit(1 if grand_total else 0)  # non-zero exit = dangling references found (GitHub Actions FAIL)

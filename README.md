@@ -74,8 +74,11 @@ H1625 / H1619 / H3124 / H9207: upload `input/<C>/<C>.zip`, run validation with t
 ## Add a validation script
 Drop `scripts/<anything>.py` (not starting with `_`; helpers should be named `_helper.py`). It is auto-discovered and run for every contract. A script with no entry in `config/validators.json` is run with no arguments and gets env vars: `CONTRACT_ID`, `CONTRACT_ORG`, `INPUT_DIR` (parent of `<CONTRACT>/*.json`), `CONTRACT_DIR` (the JSON files), `OUTPUT_DIR` (also the working directory: write reports there). Exit 0 = PASS, non-zero = FAIL. Optionally add an entry for a label, CLI args (`{contract} {org} {input_dir} {contract_dir} {output_dir} {cache_dir}`), attachments, and a template `email_templates/<script>.html`.
 
+## Ported from the `maplan` repo
+`check_hyLOCAL.py` now also produces what `maplan/check_refs.py` produced: `reference_integrity_contract_<C>_report.xlsx` and `.docx`, `resource_counts_<C>.csv`, and orphan name/type/flag columns. Its email shows the same full report tables inline in the email body (`tools/build_html_report.py`, copied from maplan) and attaches the Excel and Word reports. The other two scripts keep their own Word/CSV reports as attachments.
+
 ## Changes made to your scripts (logic untouched)
-- `check_hyLOCAL.py`: reads JSON from `$INPUT_DIR` when set; exits 1 if dangling references exist.
+- `check_hyLOCAL.py`: reads JSON from `$INPUT_DIR` when set; exits 1 if dangling references exist; plus the maplan report features above.
 - `mpf_auditLOCAL.py`: local file pattern `chpw-<C>-*` became `*-<C>-*` (JHP files are `jhp-...`); `--local` accepts contracts not in `INDEX_URLS` (e.g. H1625).
 - `validate_maLOCAL.py`: exits 1 if any check failed (previously always 0).
 

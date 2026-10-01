@@ -10,7 +10,7 @@ Optional env:  SMTP_SERVER (default smtp.gmail.com), SMTP_PORT (default 465, SSL
 Template for script X.py = email_templates/X.html, else email_templates/_default.html.
 Placeholders: {{contract}} {{label}} {{script}} {{status}} {{exit_code}} {{duration}} {{overall}}
 {{total}} {{passed}} {{failed}} {{json_count}} {{reports}} {{attachments}} {{skipped}}
-{{log_tail}} {{run_url}} {{zip_path}}.
+{{log_tail}} {{run_url}} {{zip_path}} {{html_report}} (check_hy: inline report tables).
 
 Attachments: the script's 'attach' globs (config/validators.json) in priority order, until the size
 budget is used; anything left out is listed as "in the artifact". Updates results.json["email"].
@@ -26,6 +26,8 @@ from email.message import EmailMessage
 from html import escape
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from build_html_report import build_html_report  # noqa: E402  (ported from maplan)
 TPL = os.path.join(ROOT, "email_templates")
 
 
@@ -128,7 +130,10 @@ def main():
                 "log_tail": escape(log_tail(s)), "run_url": escape(run_url or "n/a"),
                 "zip_path": escape(r["zip_path"]),
             }
-            html = fill(template_for(s["name"]), vals)
+            tpl = template_for(s["name"])
+            if "{{html_report}}" in tpl:      # full report tables inline, like maplan
+                vals["html_report"] = build_html_report(reports_dir=os.path.join(ROOT, s["folder"]))
+            html = fill(tpl, vals)
             msg = EmailMessage()
             msg["Subject"] = "MPF %s Provider Directory Validation Report - %s" % (r["contract"], s["label"])
             msg["From"] = user
