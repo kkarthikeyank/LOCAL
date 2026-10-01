@@ -4602,10 +4602,19 @@ def _gather_contract_summary_data(cov_path, contract, summary=None):
     # Location, OrganizationAffiliation, AND Organization showed only
     # "Location" because that was the one example on file.
     by_code = {}
+    failed_types = defaultdict(list)   # code -> resource types of the captured FAILING examples
     for row in cov_rows:
         by_code.setdefault(row["error_code"], row)
+        ft = (row.get("resource_type") or "").strip()
+        if row.get("status") == "FAIL_SEEN" and ft and ft not in failed_types[row["error_code"]]:
+            failed_types[row["error_code"]].append(ft)
     for row in by_code.values():
+        row["example_resource_type"] = row.get("resource_type") or ""   # the ONE example's own type
         row["resource_type"] = row.get("all_resource_types_tested") or row.get("resource_type") or ""
+        tested_types = [t.strip() for t in row["resource_type"].split(",") if t.strip()]
+        fails = failed_types.get(row["error_code"], [])
+        row["failed_resource_types"] = ", ".join(fails) or "--"
+        row["passed_resource_types"] = ", ".join(t for t in tested_types if t not in fails) or "--"
     codes = sorted(by_code.values(), key=lambda r: r["error_code"])
 
     status_counts = Counter(r["status"] for r in codes)
@@ -4645,7 +4654,7 @@ def _example_identifier_cell(r):
     ident = (r.get("identifier") or "").strip()
     if not ident:
         return "--"
-    rtype = (r.get("resource_type") or "").strip()
+    rtype = (r.get("example_resource_type") or r.get("resource_type") or "").strip()
     return f"{rtype}/{ident}" if rtype else ident
 
 
