@@ -1,0 +1,8 @@
+{
+  "_comment": "One entry per contract. 'org' is the submitting organisation passed to scripts that need it (validate_maLOCAL.py). To add a contract: add it here AND to the dropdown 'options' in both workflows (see README).",
+  "H1625": {"org": "JHP"},
+  "H1619": {"org": "JHP"},
+  "H3124": {"org": "JHP"},
+  "H9207": {"org": "JHP"},
+  "H5826": {"org": "CHPW"}
+}

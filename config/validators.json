@@ -1,0 +1,25 @@
+{
+  "_comment": "Optional per-script settings, keyed by file name in scripts/. Any scripts/*.py not starting with '_' is auto-discovered and run; a script with no entry here is run with no CLI args and reads the env vars CONTRACT_ID, CONTRACT_ORG, INPUT_DIR (parent of <CONTRACT>/*.json), CONTRACT_DIR, OUTPUT_DIR and writes its reports to OUTPUT_DIR (its working directory). Arg placeholders: {contract} {org} {input_dir} {contract_dir} {output_dir} {cache_dir}. 'attach' = report globs to attach to this script's email, in priority order, up to the size budget.",
+  "defaults": {
+    "timeout_minutes": 150,
+    "max_attach_mb": 20
+  },
+  "check_hyLOCAL.py": {
+    "order": 1,
+    "label": "Reference Integrity Check (check_hy)",
+    "args": ["{contract}"],
+    "attach": ["dangling_summary_*.csv", "placeholder_refs_*.csv", "orphan_refs_*.csv", "dangling_refs_*.csv"]
+  },
+  "mpf_auditLOCAL.py": {
+    "order": 2,
+    "label": "CMS Technical Guide Audit (mpf_audit)",
+    "args": ["--local", "--local-dir", "{input_dir}", "--out", "{output_dir}", "--cache", "{cache_dir}", "--contracts", "{contract}"],
+    "attach": ["*.docx", "findings_*.csv"]
+  },
+  "validate_maLOCAL.py": {
+    "order": 3,
+    "label": "MA Directory Validation (validate_ma)",
+    "args": ["--local", "{org}", "{contract}", "{contract_dir}"],
+    "attach": ["MPF_Audit_Report_*.docx", "contract_summary_*.docx", "end_to_end_summary_*.csv", "appendix_b_summary_*.csv", "fatal_error_summary_*.csv", "ma_directory_validation_report_*.csv"]
+  }
+}

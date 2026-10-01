@@ -1,0 +1,88 @@
+name: MPF Manual Cleanup
+
+# Separate from validation. Nothing is deleted unless you type DELETE.
+# ZIP and JSON are independent: choose KEEP or DELETE for each.
+on:
+  workflow_dispatch:
+    inputs:
+      contract:
+        description: "Contract ID"
+        type: choice
+        required: true
+        default: H1625
+        options:            # keep in sync with manual_validation.yml
+          - H1625
+          - H1619
+          - H3124
+          - H9207
+      zip:
+        description: "ZIP (input/<contract>/<contract>.zip)"
+        type: choice
+        required: true
+        default: KEEP
+        options: [KEEP, DELETE]
+      json:
+        description: "JSON (only .json files committed under input/<contract>/)"
+        type: choice
+        required: true
+        default: KEEP
+        options: [KEEP, DELETE]
+      confirmation:
+        description: "Type DELETE to confirm (required if ZIP or JSON = DELETE)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mpf-cleanup-${{ github.event.inputs.contract }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      CONTRACT: ${{ github.event.inputs.contract }}
+      DEL_ZIP: ${{ github.event.inputs.zip }}
+      DEL_JSON: ${{ github.event.inputs.json }}
+      CONFIRM: ${{ github.event.inputs.confirmation }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete selected files
+        run: |
+          set -euo pipefail
+          if [ "$DEL_ZIP" != "DELETE" ] && [ "$DEL_JSON" != "DELETE" ]; then
+            echo "ZIP=KEEP and JSON=KEEP: nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          if [ "$CONFIRM" != "DELETE" ]; then
+            echo "::error::Confirmation must be exactly DELETE. Nothing was deleted."; exit 1
+          fi
+          DIR="input/$CONTRACT"
+          [ -d "$DIR" ] || { echo "::error::$DIR does not exist."; exit 1; }
+          : > deleted.txt
+          if [ "$DEL_ZIP" = "DELETE" ]; then
+            [ -f "$DIR/$CONTRACT.zip" ] && { git rm -q "$DIR/$CONTRACT.zip"; echo "$DIR/$CONTRACT.zip" >> deleted.txt; } \
+              || echo "No ZIP found at $DIR/$CONTRACT.zip"
+          fi
+          if [ "$DEL_JSON" = "DELETE" ]; then
+            # Only committed JSON under this contract's input folder; never the ZIP, scripts, reports or config.
+            git ls-files "$DIR" | grep -iE '\.json$' > json_list.txt || true
+            if [ -s json_list.txt ]; then
+              xargs -d '\n' git rm -q < json_list.txt; cat json_list.txt >> deleted.txt
+            else
+              echo "No persisted JSON files under $DIR (extracted JSON only exists on the temporary runner)."
+            fi
+          fi
+          {
+            echo "## MPF Manual Cleanup - $CONTRACT"
+            echo "ZIP: $DEL_ZIP | JSON: $DEL_JSON"
+            echo; echo "Deleted $(wc -l < deleted.txt) file(s):"; sed 's/^/- /' deleted.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+          if git diff --cached --quiet; then echo "Nothing to commit."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Cleanup $CONTRACT: ZIP=$DEL_ZIP JSON=$DEL_JSON"
+          git push

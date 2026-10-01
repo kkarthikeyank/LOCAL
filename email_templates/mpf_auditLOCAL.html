@@ -1,0 +1,18 @@
+<html><body style="font-family:Arial,sans-serif;font-size:14px;color:#222">
+<h2 style="margin-bottom:4px">MPF {{contract}} Provider Directory Validation Report</h2>
+<h3 style="margin-top:0;color:#555">{{label}}</h3>
+<p>Audits the submission against the CMS MA provider directory technical guide and rates findings by level (L1 fatal, L2 record-level, L3 advisory). <b>FAIL</b> means one or more Level 1 FATAL findings: the dataset would be rejected by CMS.</p>
+<table cellpadding="6" style="border-collapse:collapse;border:1px solid #ccc">
+<tr><td><b>Contract ID</b></td><td>{{contract}}</td></tr>
+<tr><td><b>This validation ({{script}})</b></td><td><b>{{status}}</b> (exit code {{exit_code}}, {{duration}})</td></tr>
+<tr><td><b>Input ZIP / JSON files</b></td><td>{{zip_path}} / {{json_count}} JSON file(s)</td></tr>
+<tr><td><b>Number of validation scripts</b></td><td>{{total}}</td></tr>
+<tr><td><b>Passed / Failed (all scripts)</b></td><td>{{passed}} / {{failed}}</td></tr>
+<tr><td><b>Overall result</b></td><td><b>{{overall}}</b></td></tr>
+<tr><td><b>GitHub Actions run</b></td><td>{{run_url}}</td></tr>
+</table>
+<h4>Audit outputs (Word report and findings CSVs)</h4>{{reports}}
+<h4>Attached</h4>{{attachments}}
+<h4>Not attached (download from the run artifact MPF-{{contract}}-Validation-Reports)</h4>{{skipped}}
+<h4>Last log lines</h4><pre style="background:#f5f5f5;padding:8px;font-size:12px;white-space:pre-wrap">{{log_tail}}</pre>
+</body></html>

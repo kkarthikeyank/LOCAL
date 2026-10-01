@@ -1,0 +1,101 @@
+name: MPF Manual Validation
+
+# Manual only. Pick a contract, upload nothing here -- the ZIP must already be in
+# input/<CONTRACT>/<CONTRACT>.zip (see README, "Upload a ZIP").
+on:
+  workflow_dispatch:
+    inputs:
+      contract:
+        description: "Contract ID"
+        type: choice
+        required: true
+        default: H1625
+        options:            # <-- add new contracts here (and in manual_cleanup.yml + config/contracts.json)
+          - H1625
+          - H1619
+          - H3124
+          - H9207
+      send_email:
+        description: "Send Email"
+        type: choice
+        required: true
+        default: "No"
+        options:
+          - "No"
+          - "Yes"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mpf-validation-${{ github.event.inputs.contract }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      CONTRACT: ${{ github.event.inputs.contract }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check contract is configured
+        run: |
+          python - <<'EOF'
+          import json, os, sys
+          c = os.environ["CONTRACT"]
+          cfg = json.load(open("config/contracts.json"))
+          if c not in cfg:
+              sys.exit("::error::%s is missing from config/contracts.json - add it (see README, Future contracts)." % c)
+          EOF
+
+      - name: Extract ZIP, find JSON, run all validation scripts
+        id: run
+        run: |
+          python tools/run_validations.py "$CONTRACT"
+          RES="$(cat work/results_path.txt)"
+          echo "results=$RES" >> "$GITHUB_OUTPUT"
+          echo "run_dir=$(dirname "$RES")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload report artifact
+        if: always() && steps.run.outputs.run_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: MPF-${{ github.event.inputs.contract }}-Validation-Reports
+          path: ${{ steps.run.outputs.run_dir }}
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Send email (one per validation script)
+        if: always() && github.event.inputs.send_email == 'Yes' && steps.run.outputs.results != ''
+        env:
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          SMTP_SERVER: ${{ vars.SMTP_SERVER }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python tools/send_email.py "${{ steps.run.outputs.results }}"
+
+      - name: Job summary
+        if: always() && steps.run.outputs.results != ''
+        run: python tools/summary.py "${{ steps.run.outputs.results }}"
+
+      - name: Fail job if validation failed
+        if: always() && steps.run.outputs.results != ''
+        run: |
+          python - "${{ steps.run.outputs.results }}" <<'EOF'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          print("Overall Result:", r["overall"])
+          sys.exit(0 if r["overall"] == "PASS" else 1)
+          EOF
