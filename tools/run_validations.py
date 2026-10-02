@@ -11,6 +11,7 @@ Run every validation script in scripts/ against one contract's ZIP.
 Always exits 0 once results.json is written; the workflow decides pass/fail from it.
 Nothing under input/ or reports/ is ever deleted.
 """
+import fnmatch
 import glob
 import json
 import os
@@ -78,7 +79,7 @@ def discover_scripts(cfg):
         name = os.path.basename(p)
         c = cfg.get(name, {})
         items.append({"name": name, "path": p, "label": c.get("label", name),
-                      "args": c.get("args", []), "attach": c.get("attach", []),
+                      "args": c.get("args", []), "attach": c.get("attach", []), "dynamic": c.get("dynamic_report", []),
                       "order": c.get("order", 1000)})
     items.sort(key=lambda i: (i["order"], i["name"]))
     return items
@@ -208,10 +209,16 @@ def main():
         print("::endgroup::")
         print("%s  %s  (exit %s, %ds)%s" % (s["name"], status, code, secs, " " + note if note else ""))
         reports = [f for f in list_files(out_dir) if f != "run.log"]
+        pats = [p.format(contract=contract) for p in s["dynamic"]]
+        found = [f for f in reports if any(fnmatch.fnmatch(os.path.basename(f), p) for p in pats)]
+        dyn_status = "N/A" if not pats else ("GENERATED" if found else "MISSING")
+        if dyn_status == "MISSING":
+            print("::warning::%s: dynamic report not generated (expected %s)" % (s["name"], ", ".join(pats)))
         res["scripts"].append({"name": s["name"], "label": s["label"], "status": status,
                                "exit_code": code, "seconds": secs, "note": note,
                                "folder": os.path.relpath(out_dir, ROOT).replace(os.sep, "/"),
-                               "report_files": reports, "attach": s["attach"]})
+                               "report_files": reports, "attach": s["attach"],
+                               "dynamic_status": dyn_status, "dynamic_files": found})
     finish()
 
 

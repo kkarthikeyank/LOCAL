@@ -7,18 +7,21 @@
   "check_hyLOCAL.py": {
     "order": 1,
     "label": "Reference Integrity Check (check_hy)",
+    "dynamic_report": ["reference_integrity_contract_*_report.docx", "reference_integrity_contract_*_report.xlsx"],
     "args": ["{contract}"],
     "attach": ["*.xlsx", "*.docx", "dangling_summary_*.csv", "placeholder_refs_*.csv", "orphan_refs_*.csv", "dangling_refs_*.csv"]
   },
   "mpf_auditLOCAL.py": {
     "order": 2,
     "label": "CMS Technical Guide Audit (mpf_audit)",
+    "dynamic_report": ["MPF_Provider_Directory_Audit_CY*.docx"],
     "args": ["--local", "--local-dir", "{input_dir}", "--out", "{output_dir}", "--cache", "{cache_dir}", "--contracts", "{contract}"],
     "attach": ["*.docx", "findings_*.csv", "*.xlsx"]
   },
   "validate_maLOCAL.py": {
     "order": 3,
     "label": "MA Directory Validation (validate_ma)",
+    "dynamic_report": ["MPF_Audit_Report_{contract}_*.docx"],
     "args": ["--local", "{org}", "{contract}", "{contract_dir}"],
     "attach": ["*.xlsx", "*.docx"]
   }

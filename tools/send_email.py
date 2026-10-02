@@ -227,6 +227,16 @@ def main():
                 if "{{html_report}}" in tpl:      # full report tables inline, like maplan
                     vals["html_report"] = build_html_report(reports_dir=os.path.join(ROOT, s["folder"]))
                 html = fill(tpl, vals)
+            dyn_status = s.get("dynamic_status", "N/A")
+            if dyn_status != "N/A":       # dynamic report check, shown in every script's email
+                names = ", ".join(os.path.basename(x) for x in s.get("dynamic_files", [])) or "none"
+                color = "#1b6b3a" if dyn_status == "GENERATED" else "#b3261e"
+                box = ('<div style="margin:14px 0;padding:10px 14px;border-left:4px solid %s;background:#f4f6fa;'
+                       'font-family:Segoe UI,Arial,sans-serif;font-size:13px"><b>Dynamic report: '
+                       '<span style="color:%s">%s</span></b><br>%s</div>' % (color, color, dyn_status, escape(names)))
+                html = html.replace("</body>", box + "</body>") if "</body>" in html else html + box
+                if plain is not None:
+                    plain += "\nDynamic report: %s (%s)\n" % (dyn_status, names)
             msg = EmailMessage()
             msg["Subject"] = "MPF %s Provider Directory Validation Report - %s" % (r["contract"], s["label"])
             msg["From"] = user

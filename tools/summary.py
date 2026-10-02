@@ -25,12 +25,14 @@ def render(r):
           "| **Email** | %s |" % r["email"],
           "| **Overall Result** | %s **%s** |" % (ic[r["overall"]], r["overall"]), ""]
     if r["scripts"]:
-        L += ["## VALIDATION RESULTS", "", "| # | Script | Result | Exit | Time | Report files |",
-              "|---|---|---|---|---|---|"]
+        L += ["## VALIDATION RESULTS", "", "| # | Script | Result | Exit | Time | Report files | Dynamic report |",
+              "|---|---|---|---|---|---|---|"]
         for i, s in enumerate(r["scripts"], 1):
-            L.append("| %d | `%s` | %s %s | %s | %ds | %d%s |" % (
+            dyn = s.get("dynamic_status", "N/A")
+            L.append("| %d | `%s` | %s %s | %s | %ds | %d%s | %s%s |" % (
                 i, s["name"], ic[s["status"]], s["status"], s["exit_code"], s["seconds"],
-                len(s["report_files"]), " — " + s["note"] if s["note"] else ""))
+                len(s["report_files"]), " — " + s["note"] if s["note"] else "",
+                "⚠️ " if dyn == "MISSING" else "", dyn))
         L.append("")
     for n in r["notes"]:
         L.append("> ⚠️ %s" % n)

@@ -83,6 +83,9 @@ Drop `scripts/<anything>.py` (not starting with `_`; helpers should be named `_h
 
 The `validate_maLOCAL.py` email follows maplancopy's `mpf_monitor.py` logic: result is COMPLETED / FAILED / DOWNLOAD FAILURE / SCRIPT FAILURE (warning-only codes such as P1004 do not fail the run), a stage table (Download files, Parse JSON, Reference, FHIR, Business validation), attachments `<C>_contract_summary_<date>.docx` and `<C>_validation_report_<date>.xlsx` (zipped if over the 14 MB cap), and the same stage table and failed-checks table in the job summary.
 
+## Dynamic report check (all scripts)
+Each script's `dynamic_report` patterns in `config/validators.json` name the report it must produce (`check_hy`: `reference_integrity_contract_<C>_report.docx/.xlsx`; `mpf_audit`: `MPF_Provider_Directory_Audit_CY*.docx`; `validate_ma`: `MPF_Audit_Report_<C>_*.docx`). After each script the runner checks the files exist and shows **Dynamic report: GENERATED / MISSING** in the job summary table, in a warning annotation, and in that script's email (which also attaches the report). A MISSING report does not change PASS/FAIL. Add a `dynamic_report` entry for any new script.
+
 ## Changes made to your scripts (logic untouched)
 - `check_hyLOCAL.py`: reads JSON from `$INPUT_DIR` when set; exits 1 if dangling references exist; plus the maplan report features above.
 - `mpf_auditLOCAL.py`: local file pattern `chpw-<C>-*` became `*-<C>-*` (JHP files are `jhp-...`); `--local` accepts contracts not in `INDEX_URLS` (e.g. H1625).
