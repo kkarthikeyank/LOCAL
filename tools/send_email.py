@@ -95,7 +95,13 @@ def ma_prepare(r, s, budget_mb=14):
         shutil.copy(docx_src, os.path.join(base, docx_dst))
         shutil.copy(xlsx_src, os.path.join(base, xlsx_dst))
         files.append(docx_dst)
-        room = int(budget_mb * 1048576) - os.path.getsize(os.path.join(base, docx_dst))
+        # LOCAL-only: the dynamic audit report (write_dynamic_audit_docx) has no maplancopy counterpart
+        dyn = next((f for f in s["report_files"] if f.startswith("MPF_Audit_Report_%s_" % c) and f.endswith(".docx")), None)
+        if dyn:
+            dyn_dst = "%s_dynamic_audit_report_%s.docx" % (c, today)
+            shutil.copy(os.path.join(base, dyn), os.path.join(base, dyn_dst))
+            files.append(dyn_dst)
+        room = int(budget_mb * 1048576) - sum(os.path.getsize(os.path.join(base, f)) for f in files)
         if os.path.getsize(os.path.join(base, xlsx_dst)) <= room:
             files.append(xlsx_dst)
         else:
